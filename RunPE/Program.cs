@@ -14,7 +14,7 @@ namespace RunPE
 
         internal static Encoding encoding;
 
-        private static int Main(string[] args)
+        public static int Main(string[] args)
         {
 
 #if BREAK
