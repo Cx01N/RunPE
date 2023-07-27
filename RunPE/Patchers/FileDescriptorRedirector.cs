@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using ThreadingTasks = System.Threading.Tasks;
 using RunPE.Internals;
 
 namespace RunPE.Patchers
@@ -113,7 +114,7 @@ namespace RunPE.Patchers
 
         internal void StartReadFromPipe()
         {
-            _readTask = Task.Factory.StartNew(() =>
+            _readTask = ThreadingTasks.Task.Factory.StartNew(() =>
             {
                 var output = "";
 
