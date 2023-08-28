@@ -76,6 +76,7 @@ namespace RunPE
                 }
 
                 fileDescriptorRedirector.StartReadFromPipe();
+                StartExecution(peRunDetails.args, pe, currentBase);
 
                 // Revert changes
                 exitPatcher.ResetExitFunctions();
