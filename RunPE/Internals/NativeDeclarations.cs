@@ -1,7 +1,13 @@
-﻿using System;
+﻿using DInvoke.DynamicInvoke;
+using System;
 using System.Runtime.ConstrainedExecution;
 using System.Runtime.InteropServices;
 using System.Security;
+using static DInvoke.DynamicInvoke.Native.DELEGATES;
+
+using DInvoke.DynamicInvoke;
+using Native = DInvoke.Data.Native;
+using Win32 = DInvoke.Data.Win32;
 
 namespace RunPE.Internals
 {
@@ -22,6 +28,23 @@ namespace RunPE.Internals
         internal const uint IMAGE_SCN_MEM_EXECUTE = 0x20000000;
         internal const uint IMAGE_SCN_MEM_READ = 0x40000000;
         internal const uint IMAGE_SCN_MEM_WRITE = 0x80000000;
+
+        public enum MEMORY_PROTECTION : uint
+        {
+            PAGE_NOACCESS = 0x01,
+            PAGE_READONLY = 0x02,
+            PAGE_READWRITE = 0x04,
+            PAGE_WRITECOPY = 0x08,
+            PAGE_EXECUTE = 0x10,
+            PAGE_EXECUTE_READ = 0x20,
+            PAGE_EXECUTE_READWRITE = 0x40,
+            PAGE_EXECUTE_WRITECOPY = 0x80,
+            PAGE_GUARD = 0x100,
+            PAGE_NOCACHE = 0x200,
+            PAGE_WRITECOMBINE = 0x400,
+            PAGE_TARGETS_INVALID = 0x40000000,
+            PAGE_TARGETS_NO_UPDATE = 0x40000000
+        }
 
         [StructLayout(LayoutKind.Sequential)]
         internal struct IMAGE_BASE_RELOCATION
@@ -89,6 +112,46 @@ namespace RunPE.Internals
         [DllImport("kernel32.dll")]
         internal static extern bool VirtualProtect(IntPtr lpAddress, UIntPtr dwSize, uint flNewProtect,
             out uint lpFlOldProtect);
+
+        [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+        delegate uint NtProtectVirtualMemoryDelegate(
+            IntPtr ProcessHandle,
+            ref IntPtr BaseAddress,
+            ref IntPtr RegionSize,
+            uint NewProtection,
+            out uint OldProtection);
+
+        public static Native.NTSTATUS NtProtectVirtualMemory(
+            IntPtr hProcess,
+            ref IntPtr baseAddress,
+            int length,
+            MEMORY_PROTECTION protection,
+            out MEMORY_PROTECTION oldProtection)
+        {
+            IntPtr regionSize = new IntPtr(length);
+            uint newProtection = (uint)protection;
+            uint oldProtectionTemp = 0;
+
+            object[] funcParams = {
+        hProcess, baseAddress, regionSize,
+        newProtection, oldProtectionTemp
+    };
+
+            Native.NTSTATUS status = (Native.NTSTATUS)DInvoke.DynamicInvoke.Generic.DynamicAPIInvoke(
+                "ntdll.dll",
+                "NtProtectVirtualMemory",
+                typeof(NtProtectVirtualMemoryDelegate),
+                ref funcParams);
+
+            // Update out parameters
+            oldProtection = (MEMORY_PROTECTION)funcParams[4];
+            // Note: You may need to update the baseAddress and regionSize if they are changed by the API call
+            // baseAddress = (IntPtr)funcParams[1];
+            // regionSize = (IntPtr)funcParams[2];
+
+            return status;
+        }
+
 
         [DllImport("kernel32.dll", CharSet = CharSet.Auto)]
         internal static extern IntPtr GetModuleHandle(string lpModuleName);

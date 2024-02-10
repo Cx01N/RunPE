@@ -3,6 +3,15 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using RunPE.Internals;
 
+using DInvoke;
+using DInvoke.Data;
+using DInvoke.DynamicInvoke;
+using Native = DInvoke.Data.Native;
+
+using static RunPE.Internals.NativeDeclarations;
+using static DInvoke.DynamicInvoke.Native.DELEGATES;
+using System.Diagnostics;
+
 namespace RunPE.Helpers
 {
     internal static class Utils
@@ -77,34 +86,56 @@ namespace RunPE.Helpers
 #endif
             return originalBytes;
         }
-
         internal static bool PatchAddress(IntPtr pAddress, IntPtr newValue)
         {
-            var result = NativeDeclarations.VirtualProtect(pAddress, (UIntPtr) IntPtr.Size,
-                NativeDeclarations.PAGE_EXECUTE_READWRITE, out var oldProtect);
-            if (!result)
+            IntPtr processHandle = Process.GetCurrentProcess().Handle; // Handle to the current process
+            IntPtr baseAddress = pAddress; // Base address to change protection on
+            IntPtr regionSize = new IntPtr(IntPtr.Size); // Size of the region as IntPtr
+            uint newProtect = (uint)MEMORY_PROTECTION.PAGE_EXECUTE_READWRITE; // New protection
+            uint oldProtect; // Variable to store the old protection
+
+            // Prepare parameters for the API call
+            object[] parameters = {
+                processHandle,
+                baseAddress,
+                regionSize,
+                newProtect,
+                null // Placeholder for the out parameter
+            };
+
+            // Invoke NtProtectVirtualMemory to change memory protection
+            var result = (Native.NTSTATUS)DInvoke.DynamicInvoke.Generic.DynamicAPIInvoke(
+                "ntdll.dll", "NtProtectVirtualMemory",
+                typeof(NtProtectVirtualMemory), ref parameters);
+
+            if (result != Native.NTSTATUS.Success)
             {
-#if DEBUG
-                Console.WriteLine(
-                    $"[-] Unable to change memory protections to RW for modification on address: 0x{pAddress.ToString("X")}");
-#endif
+                Console.WriteLine($"Failed to change memory protection. NTSTATUS: {result}");
                 return false;
             }
 
+            // Write the new value to the address
             Marshal.WriteIntPtr(pAddress, newValue);
-            result = NativeDeclarations.VirtualProtect(pAddress, (UIntPtr) IntPtr.Size, oldProtect, out _);
-            if (!result)
+
+            // Restore original memory protection
+            oldProtect = (uint)parameters[4];
+            parameters[3] = oldProtect; // Set NewProtect back to the original protection
+            result = (Native.NTSTATUS)DInvoke.DynamicInvoke.Generic.DynamicAPIInvoke(
+                "ntdll.dll", "NtProtectVirtualMemory",
+                typeof(NtProtectVirtualMemory), ref parameters);
+
+            if (result != Native.NTSTATUS.Success)
             {
-#if DEBUG
-                Console.WriteLine($"[-] Unable to revert memory protections on address 0x{pAddress.ToString("X")}");
-#endif
+                Console.WriteLine($"Failed to restore memory protection. NTSTATUS: {result}");
                 return false;
             }
-#if DEBUG
-            Console.WriteLine($"[+] Patched pointer at 0x{pAddress.ToString("X")} to 0x{newValue.ToString("X")}");
-#endif
+
+            Console.WriteLine($"Successfully patched address {pAddress.ToInt64():X}.");
             return true;
         }
+
+
+
 
         internal static bool ZeroOutMemory(IntPtr start, int length)
         {

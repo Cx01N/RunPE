@@ -5,6 +5,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using RunPE.Internals;
 
+using StringTask = System.Threading.Tasks.Task<string>;
+
 namespace RunPE.Patchers
 {
     internal class FileDescriptorPair
@@ -27,7 +29,8 @@ namespace RunPE.Patchers
 
         private FileDescriptorPair _kpStdOutPipes;
         private FileDescriptorPair _kpStdInPipes;
-        private Task<string> _readTask;
+
+        private StringTask _readTask;
 
         public bool RedirectFileDescriptors()
         {
@@ -113,47 +116,46 @@ namespace RunPE.Patchers
 
         internal void StartReadFromPipe()
         {
-            _readTask = Task.Factory.StartNew(() =>
+            _readTask = StringTask.Factory.StartNew(() =>
             {
-                var output = "";
+                StringBuilder output = new StringBuilder();
+                byte[] buffer = new byte[BYTES_TO_READ];
+                uint bytesRead;
 
-                var buffer = new byte[BYTES_TO_READ];
-                byte[] outBuffer;
-
-                var ok = NativeDeclarations.ReadFile(_kpStdOutPipes.Read, buffer, BYTES_TO_READ, out var bytesRead, IntPtr.Zero);
-
-                if (!ok)
+                do
                 {
-                    Console.WriteLine($"[-] Unable to read from 'subprocess' pipe");
-                    return "";
-                }
-#if DEBUG
-                Console.WriteLine($"[*] Read {bytesRead} bytes from 'subprocess' pipe");
-#endif
-                if (bytesRead != 0)
-                {
-                    outBuffer = new byte[bytesRead];
-                    Array.Copy(buffer, outBuffer, bytesRead);
-                    output += Encoding.Default.GetString(outBuffer);
-                }
+                    bool readSuccessful = NativeDeclarations.ReadFile(_kpStdOutPipes.Read, buffer, BYTES_TO_READ, out bytesRead, IntPtr.Zero);
 
-                while (ok)
-                {
-                    ok = NativeDeclarations.ReadFile(_kpStdOutPipes.Read, buffer, BYTES_TO_READ, out bytesRead, IntPtr.Zero);
-#if DEBUG
-                    Console.WriteLine($"[*] Read {bytesRead} bytes from 'subprocess' pipe");
-#endif
-                    if (bytesRead != 0)
+                    if (bytesRead > 0)
                     {
-                        outBuffer = new byte[bytesRead];
-                        Array.Copy(buffer, outBuffer, bytesRead);
-                        output += Encoding.Default.GetString(outBuffer);
+                        string text = Encoding.Default.GetString(buffer, 0, (int)bytesRead);
+                        output.Append(text);
+                    }
+
+                    // If ReadFile fails, check if it is because the pipe is broken and terminate if so
+                    if (!readSuccessful)
+                    {
+                        int error = Marshal.GetLastWin32Error();
+                        if (error == 109) // ERROR_BROKEN_PIPE
+                        {
+#if DEBUG
+                    Console.WriteLine("[*] Subprocess has completed execution. Pipe is broken.");
+#endif
+                            break; // Exit the reading loop gracefully
+                        }
+                        else
+                        {
+                            Console.WriteLine($"[-] Error reading from pipe. Win32 Error Code: {error}");
+                            break; // Exit the loop due to unexpected error
+                        }
                     }
                 }
+                while (bytesRead > 0);
 
-                return output;
+                return output.ToString();
             });
         }
+
 
         private static IntPtr GetStdHandleIn()
         {

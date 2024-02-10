@@ -167,7 +167,7 @@ namespace RunPE.Patchers
             Console.WriteLine($"[*] New String Address: 0x{_pNewString.ToInt64():X}");
 #endif
             // Create the patch bytes that provide the new string pointer
-            var patchBytes = new List<byte> {0x48, 0xB8}; // TODO architecture
+            var patchBytes = new List<byte> { 0x48, 0xB8 }; // TODO architecture
             var pointerBytes = BitConverter.GetBytes(_pNewString.ToInt64());
 
             patchBytes.AddRange(pointerBytes);

