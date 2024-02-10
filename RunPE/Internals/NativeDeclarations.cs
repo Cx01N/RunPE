@@ -114,12 +114,12 @@ namespace RunPE.Internals
             out uint lpFlOldProtect);
 
         [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-        delegate uint NtProtectVirtualMemoryDelegate(
+        public delegate uint NtProtectVirtualMemoryDelegate(
             IntPtr ProcessHandle,
             ref IntPtr BaseAddress,
-            ref IntPtr RegionSize,
-            uint NewProtection,
-            out uint OldProtection);
+            ref uint RegionSize,
+            uint NewAccessProtection,
+            out uint OldAccessProtection);
 
         public static Native.NTSTATUS NtProtectVirtualMemory(
             IntPtr hProcess,

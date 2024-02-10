@@ -86,55 +86,50 @@ namespace RunPE.Helpers
 #endif
             return originalBytes;
         }
-        internal static bool PatchAddress(IntPtr pAddress, IntPtr newValue)
+        public static bool PatchAddress(IntPtr pAddress, IntPtr newValue)
         {
-            IntPtr processHandle = Process.GetCurrentProcess().Handle; // Handle to the current process
-            IntPtr baseAddress = pAddress; // Base address to change protection on
-            IntPtr regionSize = new IntPtr(IntPtr.Size); // Size of the region as IntPtr
-            uint newProtect = (uint)MEMORY_PROTECTION.PAGE_EXECUTE_READWRITE; // New protection
-            uint oldProtect; // Variable to store the old protection
+            // Get a handle to the current process.
+            IntPtr processHandle = Process.GetCurrentProcess().Handle;
 
-            // Prepare parameters for the API call
-            object[] parameters = {
-                processHandle,
-                baseAddress,
-                regionSize,
-                newProtect,
-                null // Placeholder for the out parameter
-            };
+            // Prepare the parameters for the NtProtectVirtualMemory call.
+            uint oldProtect = 0;
+            uint size = (uint)IntPtr.Size;
+            IntPtr baseAddress = pAddress;
+            uint newProtect = 0x40; // PAGE_EXECUTE_READWRITE
 
-            // Invoke NtProtectVirtualMemory to change memory protection
-            var result = (Native.NTSTATUS)DInvoke.DynamicInvoke.Generic.DynamicAPIInvoke(
-                "ntdll.dll", "NtProtectVirtualMemory",
-                typeof(NtProtectVirtualMemory), ref parameters);
+            // Prepare the delegate parameters.
+            object[] funcParams = { processHandle, baseAddress, size, newProtect, oldProtect };
 
-            if (result != Native.NTSTATUS.Success)
+            try
             {
-                Console.WriteLine($"Failed to change memory protection. NTSTATUS: {result}");
+                // Dynamically invoke NtProtectVirtualMemory.
+                var ntProtectVirtualMemory = (NtProtectVirtualMemoryDelegate)Marshal.GetDelegateForFunctionPointer(
+                    DInvoke.DynamicInvoke.Generic.GetLibraryAddress("ntdll.dll", "NtProtectVirtualMemory"),
+                    typeof(NtProtectVirtualMemoryDelegate));
+
+                // Change memory protection to RWX so we can write to it.
+                uint status = ntProtectVirtualMemory(processHandle, ref baseAddress, ref size, newProtect, out oldProtect);
+                if (status != 0) // STATUS_SUCCESS
+                {
+                    Console.WriteLine("[-] Failed to change memory protection.");
+                    return false;
+                }
+
+                // Write the new value to the address.
+                Marshal.WriteIntPtr(pAddress, newValue);
+
+                // Revert memory protection back to its original state.
+                ntProtectVirtualMemory(processHandle, ref baseAddress, ref size, oldProtect, out _);
+
+                Console.WriteLine("[+] Successfully patched address.");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[-] Exception during PatchAddressWithDInvoke: {ex.Message}");
                 return false;
             }
-
-            // Write the new value to the address
-            Marshal.WriteIntPtr(pAddress, newValue);
-
-            // Restore original memory protection
-            oldProtect = (uint)parameters[4];
-            parameters[3] = oldProtect; // Set NewProtect back to the original protection
-            result = (Native.NTSTATUS)DInvoke.DynamicInvoke.Generic.DynamicAPIInvoke(
-                "ntdll.dll", "NtProtectVirtualMemory",
-                typeof(NtProtectVirtualMemory), ref parameters);
-
-            if (result != Native.NTSTATUS.Success)
-            {
-                Console.WriteLine($"Failed to restore memory protection. NTSTATUS: {result}");
-                return false;
-            }
-
-            Console.WriteLine($"Successfully patched address {pAddress.ToInt64():X}.");
-            return true;
         }
-
-
 
 
         internal static bool ZeroOutMemory(IntPtr start, int length)
